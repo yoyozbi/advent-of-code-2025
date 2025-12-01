@@ -2,12 +2,9 @@ use adv_code_2025::*;
 use anyhow::*;
 use code_timing_macros::time_snippet;
 use const_format::concatcp;
-use itertools::Position;
 use regex::Regex;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
-use std::path::absolute;
-use std::thread::current;
 
 const DAY: &str = "01";
 const INPUT_FILE: &str = concatcp!("input/", DAY, ".txt");
@@ -103,11 +100,11 @@ fn main() -> Result<()> {
             let mut new_dial_number = current_dial_number;
             for _ in 0..number {
                 new_dial_number += direction;
-               if(new_dial_number == 0)  {
+               if new_dial_number == 0  {
                    number_of_zero += 1;
-               }else if(new_dial_number < 0) {
+               }else if new_dial_number < 0 {
                    new_dial_number = 99;
-               }else if(new_dial_number > 99) {
+               }else if new_dial_number > 99 {
                    number_of_zero += 1;
                    new_dial_number = 0;
                }
