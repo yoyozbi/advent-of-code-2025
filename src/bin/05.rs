@@ -3,9 +3,6 @@ use anyhow::*;
 use code_timing_macros::time_snippet;
 use const_format::concatcp;
 use itertools::Itertools;
-use std::cmp::Ordering;
-use std::collections::HashSet;
-use std::fmt::Display;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 
@@ -120,13 +117,13 @@ fn main() -> Result<()> {
             }
         }
 
-        println!(
+        /*println!(
             "{}",
             merged
                 .iter()
                 .map(|(start, end)| format!("({},{})", start, end))
                 .join(",")
-        );
+        );*/
 
         Ok(merged.iter().map(|r| (r.0..r.1).len() + 1).sum())
         //endregion
