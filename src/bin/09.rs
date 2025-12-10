@@ -3,6 +3,7 @@ use anyhow::*;
 use code_timing_macros::time_snippet;
 use const_format::concatcp;
 use itertools::Itertools;
+use rayon::prelude::*;
 use std::cmp::Ordering;
 use std::collections::HashSet;
 use std::fmt::Display;
@@ -44,26 +45,6 @@ impl Vector2 {
 impl Display for Vector2 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "({}, {})", self.x, self.y)
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Ord, PartialOrd, Hash)]
-enum GridValues {
-    NOTHING,
-    RED,
-    GREEN,
-}
-impl Display for GridValues {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{}",
-            match self {
-                GridValues::NOTHING => ".",
-                GridValues::RED => "#",
-                GridValues::GREEN => "X",
-            }
-        )
     }
 }
 
@@ -118,7 +99,14 @@ fn main() -> Result<()> {
     println!("\n=== Part 2 ===");
 
     fn part2<R: BufRead>(reader: R) -> Result<usize> {
-        let vectors = reader
+        const RED: char = '#';
+        const RED_STRING: &str = "#";
+        const GREEN: char = 'X';
+        const GREEN_STRING: &str = "X";
+        const NOTHING: char = '.';
+        const NOTHING_STRING: &str = ".";
+
+        let mut vectors = reader
             .lines()
             .flatten()
             .map(|f| {
@@ -129,12 +117,24 @@ fn main() -> Result<()> {
             .collect_vec();
 
         let max_vector_x = vectors.iter().max_by_key(|&x| x.x).unwrap().x;
+        let min_vector_x = vectors.iter().min_by_key(|&x| x.x).unwrap().x;
         let max_vector_y = vectors.iter().max_by_key(|&x| x.y).unwrap().y;
+        let min_vector_y = vectors.iter().min_by_key(|&x| x.y).unwrap().y;
 
-        let mut grid = vec![vec![GridValues::NOTHING; max_vector_x + 1]; max_vector_y + 1];
+        let delta_x = max_vector_x - min_vector_x + 1;
+        let delta_y = max_vector_y - min_vector_y + 1;
+
+        vectors = vectors
+            .iter()
+            .map(|vec| Vector2::new(vec.x - min_vector_x, vec.y - min_vector_y))
+            .collect_vec();
+
+        let mut grid = vec![String::from(NOTHING_STRING.repeat(delta_x + 1)); delta_y];
+
+        //let mut grid = vec![NOTHING.repeat(max_vector_x + 1); max_vector_y + 1];
 
         for vector in vectors.iter() {
-            grid[vector.y][vector.x] = GridValues::RED;
+            grid[vector.y].replace_range(vector.x..=vector.x, GREEN_STRING)
         }
 
         // Bounding box
@@ -151,95 +151,68 @@ fn main() -> Result<()> {
                 let min = vec1.y.min(vec2.y);
                 let max = vec1.y.max(vec2.y);
                 for y in (min + 1)..max {
-                    grid[y][vec1.x] = GridValues::GREEN;
+                    grid[y].replace_range(vec1.x..=vec1.x, GREEN_STRING);
                 }
             } else if vec1.y == vec2.y {
                 let min = vec1.x.min(vec2.x);
                 let max = vec1.x.max(vec2.x);
-                for x in (min + 1)..max {
-                    grid[vec1.y][x] = GridValues::GREEN;
-                }
+                grid[vec1.y]
+                    .replace_range((min + 1)..max, GREEN_STRING.repeat(max - min - 1).as_str());
             }
         }
 
+        println!(
+            "Computing intervals for {} lines and {} cols",
+            grid.len(),
+            grid[0].len()
+        );
         for y in 0..grid.len() {
-            let mut is_inside = false;
-            for x in 0..grid[y].len() {
-                let cell = grid[y][x];
-                match cell {
-                    GridValues::NOTHING => {
-                        if is_inside {
-                            grid[y][x] = GridValues::GREEN;
-                        }
-                    }
-                    GridValues::GREEN | GridValues::RED => {
-                        is_inside = ((x + 1)..grid[y].len())
-                            .map(|xx| grid[y][xx])
-                            .any(|f| f == GridValues::RED || f == GridValues::GREEN)
-                    }
-                }
+            let line = &grid[y];
+
+            if let (Some(first), Some(last)) =
+                (line.find(|c| c != NOTHING), line.rfind(|c| c != NOTHING))
+            {
+                grid[y].replace_range(first..=last, GREEN_STRING.repeat(last - first).as_str());
             }
         }
 
-        println!("{}", grid.iter().map(|f| f.iter().join("")).join("\n"));
+        //println!("{}", grid.iter().join("\n"));
 
-        let is_inside = grid
-            .iter()
-            .map(|r| {
-                r.iter()
-                    .map(|val| *val != GridValues::NOTHING)
-                    .collect_vec()
+        // This takes 9+ minutes on the input...
+        println!("Finding best surface");
+        let best_surface = vectors
+            .par_iter()
+            .map(|first_vec| {
+                let mut best_area = 0;
+                for second_vec in vectors.iter().filter(|f| *f != first_vec) {
+                    if first_vec.x == second_vec.x || first_vec.y == second_vec.y {
+                        continue;
+                    }
+
+                    let top = first_vec.y.min(second_vec.y);
+                    let bot = second_vec.y.max(first_vec.y);
+                    let left = second_vec.x.min(first_vec.x);
+                    let right = first_vec.x.max(second_vec.x);
+
+                    let are_all_inside = (top..=bot)
+                        .map(|yy| {
+                            let line = &grid[yy][left..=right];
+                            line == GREEN_STRING.repeat(line.len())
+                        })
+                        .all(|f| f);
+
+                    if are_all_inside {
+                        best_area = first_vec.area_with(second_vec).max(best_area);
+                    }
+                }
+                best_area
             })
-            .collect_vec();
+            .max();
 
-        // Build prefix
-        let mut pref = vec![vec![0; grid[0].len()]; grid.len()];
-        for y in 0..grid.len() {
-            for x in 0..grid[y].len() {
-                pref[y][x] = if is_inside[y][x] { 1 } else { 0 };
-                if y > 0 {
-                    pref[y][x] += pref[y - 1][x];
-                }
-                if x > 0 {
-                    pref[y][x] += pref[y][x - 1];
-                }
-                if y > 0 && x > 0 {
-                    pref[y][x] -= pref[y - 1][x - 1];
-                }
-            }
+        match best_surface {
+            Some(surface) => Ok(surface),
+            None => Err(anyhow!("No surface")),
         }
-
-        let mut best_surface = 0;
-
-        for first_vec in vectors.iter() {
-            for second_vec in vectors.iter().filter(|f| *f != first_vec) {
-                let rect_sum = |a: Vector2, b: Vector2| {
-                    let lx = a.x.min(b.x);
-                    let rx = a.x.max(b.x);
-                    let ty = a.y.min(b.y);
-                    let by = a.y.max(b.y);
-
-                    let mut res = pref[by][rx] as isize;
-                    if ty > 0 {
-                        res -= pref[ty - 1][rx] as isize;
-                    }
-                    if lx > 0 {
-                        res -= pref[by][lx - 1] as isize;
-                    }
-                    if ty > 0 && lx > 0 {
-                        res += pref[ty - 1][lx - 1] as isize;
-                    }
-                    res
-                };
-
-                let area = first_vec.area_with(second_vec);
-                if rect_sum(first_vec.clone(), second_vec.clone()) == area as isize {
-                    best_surface = area.max(best_surface);
-                }
-            }
-        }
-
-        Ok(best_surface)
     }
 
     assert_eq!(24, part2(BufReader::new(TEST.as_bytes()))?);
